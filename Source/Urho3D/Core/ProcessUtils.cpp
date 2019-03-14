@@ -37,7 +37,7 @@
 #include <mach/mach_host.h>
 #elif defined(TVOS)
 extern "C" unsigned SDL_TVOS_GetActiveProcessorCount();
-#elif !defined(__linux__) && !defined(__EMSCRIPTEN__)
+#elif !defined(__linux__) && !defined(__EMSCRIPTEN__) && !defined(UWP)
 #include <LibCpuId/libcpuid.h>
 #endif
 
@@ -159,7 +159,50 @@ static void GetCPUData(struct CpuCoreCount* data)
     }
 }
 
-#elif !defined(__EMSCRIPTEN__) && !defined(TVOS)
+#elif defined(UWP)
+struct CpuCoreCount
+{
+    unsigned numPhysicalCores_;
+    unsigned numLogicalCores_;
+};
+
+static void GetCPUData(struct CpuCoreCount* data)
+{
+    // Sanity check
+    assert(data);
+
+    // At least return 1 core
+    data->numPhysicalCores_ = data->numLogicalCores_ = 1;
+
+    // Get logical core information
+    SYSTEM_INFO sysInfo;
+    GetSystemInfo(&sysInfo);
+    data->numLogicalCores_ = sysInfo.dwNumberOfProcessors;
+
+    // Get physical core information
+    DWORD procInfoByteLen = 0;
+    BOOL result = GetLogicalProcessorInformationEx(RelationProcessorCore, NULL, &procInfoByteLen);
+    assert(result == FALSE && GetLastError() == ERROR_INSUFFICIENT_BUFFER);
+
+    BYTE* procInfoBuffer = (BYTE*)malloc(procInfoByteLen);
+    result = GetLogicalProcessorInformationEx(RelationProcessorCore, (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)procInfoBuffer, &procInfoByteLen);
+    assert(result == TRUE);
+
+    DWORD offset = 0;
+    DWORD numPhysicalCores = 0;
+    do
+    {
+        PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX procInfo = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)(procInfoBuffer + offset);
+
+        offset += procInfo->Size;
+        numPhysicalCores++;
+    } while (offset < procInfoByteLen);
+
+    data->numPhysicalCores_ = numPhysicalCores;
+}
+
+
+#elif !defined(__EMSCRIPTEN__) && !defined(TVOS) && !defined(UWP)
 static void GetCPUData(struct cpu_id_t* data)
 {
     if (cpu_identify(nullptr, data) < 0)
@@ -443,7 +486,7 @@ unsigned GetNumPhysicalCPUs()
 #else
     return SDL_TVOS_GetActiveProcessorCount();
 #endif
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(UWP)
     struct CpuCoreCount data;
     GetCPUData(&data);
     return data.numPhysicalCores_;
@@ -476,7 +519,7 @@ unsigned GetNumLogicalCPUs()
 #else
     return SDL_TVOS_GetActiveProcessorCount();
 #endif
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(UWP)
     struct CpuCoreCount data;
     GetCPUData(&data);
     return data.numLogicalCores_;
