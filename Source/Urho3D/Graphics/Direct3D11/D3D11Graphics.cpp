@@ -604,6 +604,10 @@ bool Graphics::BeginFrame()
         if (fullscreen_ && (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED))
             return false;
     }
+#else
+	// Always force an update of the back buffer on HoloLens as the platform
+	// rotates through a list of backbuffers that may be provided.
+	UpdateSwapChain(width_, height_);
 #endif
 
     // Set default rendertarget and depth buffer
