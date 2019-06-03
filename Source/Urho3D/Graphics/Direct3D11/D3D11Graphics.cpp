@@ -280,9 +280,7 @@ Graphics::~Graphics()
     impl_->rasterizerStates_.Clear();
 
     URHO3D_SAFE_RELEASE(impl_->defaultRenderTargetView_);
-#if UWP_HOLO
     URHO3D_SAFE_RELEASE(impl_->defaultStereoRenderTargetView_);
-#endif
     URHO3D_SAFE_RELEASE(impl_->defaultDepthStencilView_);
     URHO3D_SAFE_RELEASE(impl_->defaultDepthTexture_);
     URHO3D_SAFE_RELEASE(impl_->resolveTexture_);
@@ -604,11 +602,17 @@ bool Graphics::BeginFrame()
         if (fullscreen_ && (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED))
             return false;
     }
-#else
-	// Always force an update of the back buffer on HoloLens as the platform
-	// rotates through a list of backbuffers that may be provided.
-	UpdateSwapChain(width_, height_);
 #endif
+
+#if defined(UWP)
+    if (HoloLens_IsImmersiveView())
+    {
+        // Always force an update of the back buffer on HoloLens as the platform
+        // rotates through a list of backbuffers that may be provided.
+        UpdateSwapChain(width_, height_);
+    }
+#endif
+
 
     // Set default rendertarget and depth buffer
     ResetRenderTargets();
@@ -1737,11 +1741,12 @@ void Graphics::SetClipPlane(bool enable, const Plane& clipPlane, const Matrix3x4
 
 bool Graphics::IsInitialized() const
 {
-#if UWP_HOLO
-    return impl_->GetDevice() != 0;
-#else
-    return window_ != 0 && impl_->GetDevice() != 0;
+#if defined(UWP)
+    if (HoloLens_IsImmersiveView())
+        return impl_->GetDevice() != 0;
+    else
 #endif
+    return window_ != 0 && impl_->GetDevice() != 0;
 }
 
 PODVector<int> Graphics::GetMultiSampleLevels() const
@@ -1881,8 +1886,8 @@ bool Graphics::IsDeviceLost() const
 
 void Graphics::OnWindowResized()
 {
-#if UWP_HOLO
-    return;
+#if defined(UWP)
+    if (HoloLens_IsImmersiveView()) return;
 #endif
     if (!impl_->device_ || !window_)
         return;
@@ -1914,8 +1919,8 @@ void Graphics::OnWindowResized()
 
 void Graphics::OnWindowMoved()
 {
-#if UWP_HOLO
-    return;
+#if defined(UWP)
+    if (HoloLens_IsImmersiveView()) return;
 #endif
     if (!impl_->device_ || !window_ || fullscreen_)
         return;
@@ -2108,9 +2113,10 @@ bool Graphics::GetGL3Support()
 
 bool Graphics::OpenWindow(int width, int height, bool resizable, bool borderless)
 {
-#if UWP_HOLO
-    return true;
+#if defined(UWP)
+    if (HoloLens_IsImmersiveView()) return true;
 #endif
+
     if (!externalWindow_)
     {
         unsigned flags = 0;
@@ -2139,8 +2145,8 @@ bool Graphics::OpenWindow(int width, int height, bool resizable, bool borderless
 
 void Graphics::AdjustWindow(int& newWidth, int& newHeight, bool& newFullscreen, bool& newBorderless, int& monitor)
 {
-#if UWP_HOLO
-    return;
+#if defined(UWP)
+    if (HoloLens_IsImmersiveView()) return;
 #endif
     if (!externalWindow_)
     {
@@ -2180,9 +2186,21 @@ void Graphics::AdjustWindow(int& newWidth, int& newHeight, bool& newFullscreen, 
 bool Graphics::CreateDevice(int width, int height, int multiSample)
 {
 #if defined(UWP)
-    HRESULT uwphr = SDL_UWP_CreateWinrtSwapChain(width, height, multiSample, &impl_->device_, &impl_->swapChain_, &impl_->deviceContext_);
+    HRESULT uwphr;
+    if (HoloLens_IsImmersiveView())
+    {
+        uwphr = SDL_UWP_CreateHolographicSwapChain(width, height, multiSample, &impl_->device_, &impl_->swapChain_, &impl_->deviceContext_);
+    }
+    else
+    {
+        uwphr = SDL_UWP_CreateFullScreenWinrtSwapChain(&impl_->device_, &impl_->swapChain_, &impl_->deviceContext_);
+    }
+    // else
+    // {
+    //     uwphr = SDL_UWP_CreateWinrtSwapChain(width, height, multiSample, &impl_->device_, &impl_->swapChain_, &impl_->deviceContext_);
+    // }
     multiSample_ = multiSample;
-    return true;
+    return SUCCEEDED(uwphr);
 #endif
     // Device needs only to be created once
     if (!impl_->device_)
@@ -2303,15 +2321,15 @@ bool Graphics::UpdateSwapChain(int width, int height)
 #endif
 
     // Create default rendertarget view representing the backbuffer
-    ID3D11Texture2D* backbufferTexture;
+    ID3D11Texture2D* backbufferTexture = nullptr;
     HRESULT hr = 0;
     if (impl_->swapChain_)
     {
         impl_->swapChain_->ResizeBuffers(buffersCount, (UINT)width, (UINT)height, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH);
         hr = impl_->swapChain_->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backbufferTexture);
     }
-#if UWP_HOLO
-    backbufferTexture = HoloLens_GetBackbuffer();
+#if defined(UWP)
+    if (HoloLens_IsImmersiveView()) backbufferTexture = HoloLens_GetBackbuffer();
 #endif
 
     if (FAILED(hr))
@@ -2322,22 +2340,26 @@ bool Graphics::UpdateSwapChain(int width, int height)
     }
     else
     {
-#if UWP_HOLO
-        D3D11_RENDER_TARGET_VIEW_DESC desc1;
-        memset(&desc1, 0, sizeof desc1);
-        desc1.Format = DXGI_FORMAT_UNKNOWN;// textureDesc.Format;
-        desc1.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
-        desc1.Texture2DArray.ArraySize = 1;
-        desc1.Texture2DArray.FirstArraySlice = 0;
-        hr = impl_->device_->CreateRenderTargetView(backbufferTexture, &desc1, &impl_->defaultRenderTargetView_);
+#if defined(UWP)
+        if (HoloLens_IsImmersiveView())
+        {
+            D3D11_RENDER_TARGET_VIEW_DESC desc1;
+            memset(&desc1, 0, sizeof desc1);
+            desc1.Format = DXGI_FORMAT_UNKNOWN;// textureDesc.Format;
+            desc1.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+            desc1.Texture2DArray.ArraySize = 1;
+            desc1.Texture2DArray.FirstArraySlice = 0;
+            hr = impl_->device_->CreateRenderTargetView(backbufferTexture, &desc1, &impl_->defaultRenderTargetView_);
 
-        D3D11_RENDER_TARGET_VIEW_DESC desc2 = desc1;
-        desc2.Texture2DArray.FirstArraySlice = 1;
+            D3D11_RENDER_TARGET_VIEW_DESC desc2 = desc1;
+            desc2.Texture2DArray.FirstArraySlice = 1;
 
-        hr = impl_->device_->CreateRenderTargetView(backbufferTexture, &desc2, &impl_->defaultStereoRenderTargetView_);
-#else
-        hr = impl_->device_->CreateRenderTargetView(backbufferTexture, 0, &impl_->defaultRenderTargetView_);
+            hr = impl_->device_->CreateRenderTargetView(backbufferTexture, &desc2, &impl_->defaultStereoRenderTargetView_);
+        }
+        else
 #endif
+        hr = impl_->device_->CreateRenderTargetView(backbufferTexture, 0, &impl_->defaultRenderTargetView_);
+
         backbufferTexture->Release();
         if (FAILED(hr))
         {

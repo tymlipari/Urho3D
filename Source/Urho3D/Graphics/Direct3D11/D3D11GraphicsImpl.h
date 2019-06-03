@@ -30,13 +30,12 @@
 #include <d3d11.h>
 #include <dxgi.h>
 
-#if defined(UWP_HOLO)
-#include <d3d11_4.h>
-extern "C" ID3D11Texture2D* HoloLens_GetBackbuffer();
-#endif
-
 #if defined(UWP)
+extern "C" ID3D11Texture2D* HoloLens_GetBackbuffer();
 extern "C" HRESULT SDL_UWP_CreateWinrtSwapChain(int width, int height, int multiSample, ID3D11Device** device, IDXGISwapChain** sc, ID3D11DeviceContext** dc);
+extern "C" HRESULT SDL_UWP_CreateFullScreenWinrtSwapChain(ID3D11Device** device, IDXGISwapChain** sc, ID3D11DeviceContext** dc);
+extern "C" bool HoloLens_IsImmersiveView();
+extern "C" HRESULT SDL_UWP_CreateHolographicSwapChain(int width, int height, int multiSample, ID3D11Device** device, IDXGISwapChain** sc, ID3D11DeviceContext** dc);
 #endif
 
 namespace Urho3D
